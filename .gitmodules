@@ -1,0 +1,3 @@
+[submodule "open/config"]
+	path = open/config
+	url = git@github.com:HUNTERCAT-DIGITAL/LieShouCloud-config.git
