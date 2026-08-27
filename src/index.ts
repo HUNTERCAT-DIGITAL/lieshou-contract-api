@@ -29,6 +29,8 @@ export interface ApiRequestOptions {
   headers?: Record<string, string>;
   /** true 时返回 Blob（文件下载/预览,自动带 Authorization） */
   asBlob?: boolean;
+  /** true 时 401 不走会话过期拦截（登录/注册/刷新等认证接口:401=凭据错误,直接抛原始错误体） */
+  skipAuth401?: boolean;
 }
 
 // ============================================================
@@ -187,6 +189,12 @@ async function coreRequest<T>(cfg: CoreConfig, opts: ApiRequestOptions, retried 
   }
 
   if (res.status === 401) {
+    if (opts.skipAuth401) {
+      // 认证类接口（登录/注册/刷新）：401 = 凭据错误,不走会话过期拦截
+      const { code, message } = await readErrorBody(res);
+      log(res.status, `${code} ${message}`);
+      throw new AuthError(code, message, res.status);
+    }
     if (!retried && cfg.refreshTokens) {
       // 单飞：并发 401 只发起一次刷新
       const ok = await cfg.refreshTokens();
@@ -272,10 +280,12 @@ export interface ApiClient {
   put<T>(path: string, body?: unknown): Promise<T>;
   patch<T>(path: string, body?: unknown): Promise<T>;
   delete<T>(path: string): Promise<T>;
-  /** multipart 上传（CSV 导入等）：FormData 由浏览器带 boundary */
+  /** multipart 上传（CSV 导入等）：FormData 由浏览器带边界头 */
   postForm<T>(path: string, form: FormData): Promise<T>;
   /** blob 下载（文件内容流 · 自动带 Authorization） */
   getBlob(path: string): Promise<Blob>;
+  /** 完整 options 直通（供 core-web ApiPort 桥接透传 skipAuth401 等扩展字段） */
+  request<T>(opts: ApiRequestOptions): Promise<T>;
 }
 
 /** 创建 API 客户端实例（每个实例独立 baseUrl/hooks/单飞刷新） */
@@ -320,5 +330,7 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
     delete: <T>(path: string) => call<T>("DELETE", path),
     postForm: <T>(path: string, form: FormData) => call<T>("POST", path, form),
     getBlob: (path: string) => call<Blob>("GET", path, undefined, { asBlob: true }),
+    /** 完整 options 直通（供 core-web ApiPort 桥接透传 skipAuth401 等扩展字段） */
+    request: <T>(opts: ApiRequestOptions) => coreRequest<T>(instanceCfg, opts),
   };
 }
