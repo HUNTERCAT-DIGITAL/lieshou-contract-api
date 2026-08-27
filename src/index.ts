@@ -1,5 +1,5 @@
 /**
- * @lieshoucloud/api-client — 跨端共享 HTTP 客户端（L0 传输层 · Bottom-Up 优化）
+ * @lieshoucloud/contract-api — 跨端共享 HTTP 客户端（L0 传输层 · Bottom-Up 优化）
  *
  * 统一能力（各端一次接入,消灭重复的 services/api.ts）：
  * - JWT 注入（token provider 注册一次）
