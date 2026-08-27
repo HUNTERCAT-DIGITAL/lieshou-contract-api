@@ -1,4 +1,4 @@
 {
-  "extends": "@lieshoucloud/config/tsconfig.base.json",
+  "extends": "@lieshoucloud/contract-config/tsconfig.base.json",
   "include": ["src/**/*", "src/**/*.d.ts"]
 }
