@@ -184,8 +184,10 @@ async function coreRequest<T>(cfg: CoreConfig, opts: ApiRequestOptions, retried 
       body: opts.body !== undefined ? (isForm ? (opts.body as FormData) : JSON.stringify(opts.body)) : undefined,
     });
   } catch (e) {
-    log(0, `NETWORK_ERROR ${String(e)}`);
-    throw new ApiError("NETWORK_ERROR", `网络请求失败，请检查网络后重试（${String(e)}）`, 0);
+    // 保留底层原因（WebView2/Chromium 的 net::ERR_xxx，便于定位网络问题）
+    const cause = e instanceof Error && e.cause ? `（${String(e.cause)}）` : "";
+    log(0, `NETWORK_ERROR ${String(e)} ${cause}`);
+    throw new ApiError("NETWORK_ERROR", `网络请求失败，请检查网络后重试（${String(e)}${cause}）`, 0);
   }
 
   if (res.status === 401) {
