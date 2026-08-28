@@ -31,6 +31,8 @@ export interface ApiRequestOptions {
   asBlob?: boolean;
   /** true 时 401 不走会话过期拦截（登录/注册/刷新等认证接口:401=凭据错误,直接抛原始错误体） */
   skipAuth401?: boolean;
+  /** 超时毫秒数（缺省不超时）。超时后 AbortController 中止 fetch 并抛 ApiError('TIMEOUT') */
+  timeoutMs?: number;
 }
 
 /**
@@ -95,8 +97,11 @@ export function isAuthError(e: unknown): e is AuthError {
   return e instanceof AuthError;
 }
 
-/** 任意异常 → 可读 message（兜底展示用） */
+/** 任意异常 → 可读 message（兜底展示用）。ApiError/AuthError 额外带 code 便于定位 */
 export function getErrorMessage(e: unknown): string {
+  if (e instanceof ApiError || e instanceof AuthError) {
+    return e.code ? `${e.code}: ${e.message}` : e.message;
+  }
   if (e instanceof Error && e.message) return e.message;
   return String(e);
 }
@@ -107,7 +112,8 @@ export function getErrorMessage(e: unknown): string {
 
 let tokenProvider: (() => string | null) | null = null;
 let unauthorizedHandler: (() => void) | null = null;
-let refreshTokensProvider: (() => Promise<boolean>) | null = null;
+// 模块级单飞闭包：setter 时创建一次并持久化，保证跨请求共享 in-flight（并发 401 只刷一次）
+let moduleRefreshOnce: (() => Promise<boolean>) | undefined = undefined;
 let logHandler: ((entry: ApiLogEntry) => void) | null = null;
 let baseUrl = "";
 
@@ -123,7 +129,7 @@ export function setUnauthorizedHandler(fn: (() => void) | null): void {
 
 /** 注册单飞 refresh：返回 true 表示刷新成功（401 时自动重试一次） */
 export function setRefreshTokensProvider(fn: (() => Promise<boolean>) | null): void {
-  refreshTokensProvider = fn;
+  moduleRefreshOnce = createRefreshOnce(fn);
 }
 
 /** 可选 devlog 钩子（admin-web 调试面板等） */
@@ -157,6 +163,29 @@ interface CoreConfig {
   onUnauthorized?: () => void;
   refreshTokens?: () => Promise<boolean>;
   onLog?: (entry: ApiLogEntry) => void;
+}
+
+/**
+ * 单飞去重：并发调用共享同一 in-flight promise（模块级与实例级共用）。
+ * 返回 undefined 表示未配置 refresh provider（调用方直接走失败路径）。
+ */
+function createRefreshOnce(
+  provider?: (() => Promise<boolean>) | null,
+): (() => Promise<boolean>) | undefined {
+  if (!provider) return undefined;
+  let inflight: Promise<boolean> | null = null;
+  return () => {
+    if (!inflight) {
+      inflight = (async () => {
+        try {
+          return await provider();
+        } finally {
+          inflight = null;
+        }
+      })();
+    }
+    return inflight;
+  };
 }
 
 /** 解析后端标准化错误体 { error?, message? } */
@@ -202,18 +231,27 @@ async function coreRequest<T>(cfg: CoreConfig, opts: ApiRequestOptions, retried 
   const log = (status: number, error?: string) =>
     cfg.onLog?.({ method, path: opts.path, status, durationMs: Math.round(performance.now() - startedAt), error });
 
+  const controller = opts.timeoutMs ? new AbortController() : undefined;
+  const timer = opts.timeoutMs ? setTimeout(() => controller!.abort(), opts.timeoutMs) : undefined;
   let res: Response;
   try {
     res = await fetch(url, {
       method,
       headers,
       body: opts.body !== undefined ? (isForm ? (opts.body as FormData) : JSON.stringify(opts.body)) : undefined,
+      signal: controller?.signal,
     });
   } catch (e) {
-    // 保留底层原因（WebView2/Chromium 的 net::ERR_xxx，便于定位网络问题）
+    // 超时 abort → 明确报 TIMEOUT；其余保留底层原因（WebView2/Chromium 的 net::ERR_xxx）
+    if (controller?.signal.aborted) {
+      log(0, `TIMEOUT ${opts.timeoutMs}ms`);
+      throw new ApiError("TIMEOUT", `请求超时（${opts.timeoutMs}ms），请稍后重试`, 0);
+    }
     const cause = e instanceof Error && e.cause ? `（${String(e.cause)}）` : "";
     log(0, `NETWORK_ERROR ${String(e)} ${cause}`);
     throw new ApiError("NETWORK_ERROR", `网络请求失败，请检查网络后重试（${String(e)}${cause}）`, 0);
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 
   if (res.status === 401) {
@@ -253,22 +291,6 @@ async function coreRequest<T>(cfg: CoreConfig, opts: ApiRequestOptions, retried 
 // 用法 A：模块级单例（兼容旧 API）
 // ------------------------------------------------------------
 
-/** 模块级单飞 refresh（并发 401 只发一次） */
-let moduleRefreshPromise: Promise<boolean> | null = null;
-async function moduleRefreshOnce(): Promise<boolean> {
-  if (!refreshTokensProvider) return false;
-  if (!moduleRefreshPromise) {
-    moduleRefreshPromise = (async () => {
-      try {
-        return await refreshTokensProvider!();
-      } finally {
-        moduleRefreshPromise = null;
-      }
-    })();
-  }
-  return moduleRefreshPromise;
-}
-
 /** 模块级 request（旧 API：path 自动带 /api 前缀由调用方决定,配置走全局 setter） */
 export async function request<T>(opts: ApiRequestOptions): Promise<T> {
   return coreRequest<T>(
@@ -276,7 +298,7 @@ export async function request<T>(opts: ApiRequestOptions): Promise<T> {
       baseUrl,
       getToken: tokenProvider ?? undefined,
       onUnauthorized: unauthorizedHandler ?? undefined,
-      refreshTokens: refreshTokensProvider ? moduleRefreshOnce : undefined,
+      refreshTokens: moduleRefreshOnce,
       onLog: logHandler ?? undefined,
     },
     opts,
@@ -326,22 +348,8 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
     onLog: options.hooks?.onLog,
   };
 
-  // 实例级单飞
-  let instanceRefreshPromise: Promise<boolean> | null = null;
-  const refreshOnce = (): Promise<boolean> => {
-    if (!cfg.refreshTokens) return Promise.resolve(false);
-    if (!instanceRefreshPromise) {
-      instanceRefreshPromise = (async () => {
-        try {
-          return await cfg.refreshTokens!();
-        } finally {
-          instanceRefreshPromise = null;
-        }
-      })();
-    }
-    return instanceRefreshPromise;
-  };
-
+  // 实例级单飞（与模块级共用 createRefreshOnce）
+  const refreshOnce = createRefreshOnce(cfg.refreshTokens);
   const instanceCfg: CoreConfig = { ...cfg, refreshTokens: refreshOnce };
   const call = <T>(
     method: ApiRequestOptions["method"],
