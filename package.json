@@ -13,11 +13,13 @@
     "gen:api:admin": "openapi-typescript http://localhost:9000/v3/api-docs/admin -o ./src/generated.admin.ts",
     "lint": "echo \"lint: api-client ESLint config TODO Phase 2\" && exit 0",
     "typecheck": "tsc --noEmit",
-    "build": "tsc --noEmit"
+    "build": "tsc --noEmit",
+    "test": "vitest run"
   },
   "devDependencies": {
     "openapi-typescript": "^7.4.4",
     "typescript": "5.6.3",
+    "vitest": "^3.2.0",
     "@lieshoucloud/contract-config": "workspace:*"
   }
 }

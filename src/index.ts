@@ -22,7 +22,7 @@
 
 export interface ApiRequestOptions {
   method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
-  /** 含 /api 前缀,与后端路由一致（不再叠加 baseUrl 之外的路径） */
+  /** 资源路径。/api 前缀由 normalizeApiPath 幂等归一（已带/不带均可，绝对 URL 原样透传） */
   path: string;
   body?: unknown;
   query?: Record<string, string | number | boolean | undefined>;
@@ -31,6 +31,23 @@ export interface ApiRequestOptions {
   asBlob?: boolean;
   /** true 时 401 不走会话过期拦截（登录/注册/刷新等认证接口:401=凭据错误,直接抛原始错误体） */
   skipAuth401?: boolean;
+}
+
+/**
+ * path 幂等归一化（/api 前缀单一兜底点 · 2026-09 治本）。
+ *
+ * 背景：gateway/nginx 仅暴露 /api/**，但各端历史拼接约定不一：
+ *  - path 已带 /api（mobile/desktop/客户包）→ 不动（幂等）
+ *  - baseUrl 已含 /api 段（旧模式 baseUrl='/api'）→ path 纯资源不动
+ *  - path 无前缀（mini-program 等历史代码）→ 自动补 /api
+ *  - 绝对 URL（健康检查直连等）→ 不动
+ */
+export function normalizeApiPath(path: string, baseUrl: string): string {
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(path)) return path;
+  if (path === "/api" || path.startsWith("/api/")) return path;
+  if (baseUrl === "/api" || baseUrl.endsWith("/api")) return path;
+  if (path.startsWith("/")) return `/api${path}`;
+  return path;
 }
 
 // ============================================================
@@ -172,7 +189,7 @@ async function coreRequest<T>(cfg: CoreConfig, opts: ApiRequestOptions, retried 
         .join("&")
     : "";
 
-  const url = `${cfg.baseUrl}${opts.path}${qs}`;
+  const url = `${cfg.baseUrl}${normalizeApiPath(opts.path, cfg.baseUrl)}${qs}`;
   const log = (status: number, error?: string) =>
     cfg.onLog?.({ method, path: opts.path, status, durationMs: Math.round(performance.now() - startedAt), error });
 
