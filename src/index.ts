@@ -37,19 +37,26 @@ export interface ApiRequestOptions {
  * path 幂等归一化（/api 前缀单一兜底点 · 2026-09 治本）。
  *
  * 背景：gateway/nginx 仅暴露 /api/**，但各端历史拼接约定不一：
- *  - baseUrl 已含 /api 段（客户仓注入 VITE_API_BASE=.../api）→
- *    path 的 /api 前缀幂等剥离（防双写 /api/api · 0.0.37 事故回归）；纯资源路径原样
- *  - baseUrl 不含 /api 段：path 已带 /api → 不动（幂等）；无前缀 → 自动补 /api
+ *  - path 已带 /api（mobile/desktop/客户包）→ 不动（幂等）
+ *  - baseUrl 已含 /api 段（旧模式 baseUrl='/api'）→ path 纯资源不动；
+ *    path 若也带 /api → 以 baseUrl 为准剥掉，避免 /api/api 双前缀（2026-09 修复）
+ *  - path 无前缀（mini-program 等历史代码）→ 自动补 /api
+ *  - path 不以 / 开头（相对路径误传）→ 补成 /api/<path>，避免 baseUrl+path 拼成坏 URL
  *  - 绝对 URL（健康检查直连等）→ 不动
  */
 export function normalizeApiPath(path: string, baseUrl: string): string {
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(path)) return path;
-  if (baseUrl === "/api" || baseUrl.endsWith("/api")) {
-    return path.replace(/^\/api(?=\/|$)/, "");
+  const baseCarriesApi = baseUrl === "/api" || baseUrl.endsWith("/api");
+  if (baseCarriesApi) {
+    // 旧模式：/api 由 baseUrl 携带。path 带 /api 则剥掉（防双前缀），不带 / 则补上（防坏 URL）
+    if (path === "/api") return "";
+    if (path.startsWith("/api/")) return path.slice("/api".length);
+    if (path && !path.startsWith("/")) return `/${path}`;
+    return path;
   }
   if (path === "/api" || path.startsWith("/api/")) return path;
   if (path.startsWith("/")) return `/api${path}`;
-  return path;
+  return path ? `/api/${path}` : path;
 }
 
 // ============================================================

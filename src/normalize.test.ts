@@ -30,6 +30,20 @@ describe("normalizeApiPath（/api 前缀单一兜底点）", () => {
     expect(normalizeApiPath("/api-extra/foo", "https://xxx/api")).toBe("/api-extra/foo");
   });
 
+  it("baseUrl 含 /api 段 + path 也带 /api → 以 baseUrl 为准剥掉（防 /api/api 双前缀）", () => {
+    expect(normalizeApiPath("/api/users", "http://localhost:9000/api")).toBe("/users");
+    expect(normalizeApiPath("/api/users", "/api")).toBe("/users");
+  });
+
+  it("path 不以 / 开头（相对路径误传）→ 补成 /api/<path>（防 baseUrl+path 坏 URL）", () => {
+    expect(normalizeApiPath("users", "https://gw.example.com")).toBe("/api/users");
+    expect(normalizeApiPath("users", "https://gw.example.com/api")).toBe("/users");
+  });
+
+  it("baseUrl 含 /api 段 + path 不带 / → 补 /（旧模式相对路径）", () => {
+    expect(normalizeApiPath("users", "/api")).toBe("/users");
+  });
+
   it("绝对 URL → 不动（健康检查直连等）", () => {
     expect(normalizeApiPath("http://localhost:9000/actuator/health", "")).toBe(
       "http://localhost:9000/actuator/health",
