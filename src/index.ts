@@ -37,15 +37,17 @@ export interface ApiRequestOptions {
  * path 幂等归一化（/api 前缀单一兜底点 · 2026-09 治本）。
  *
  * 背景：gateway/nginx 仅暴露 /api/**，但各端历史拼接约定不一：
- *  - path 已带 /api（mobile/desktop/客户包）→ 不动（幂等）
- *  - baseUrl 已含 /api 段（旧模式 baseUrl='/api'）→ path 纯资源不动
- *  - path 无前缀（mini-program 等历史代码）→ 自动补 /api
+ *  - baseUrl 已含 /api 段（客户仓注入 VITE_API_BASE=.../api）→
+ *    path 的 /api 前缀幂等剥离（防双写 /api/api · 0.0.37 事故回归）；纯资源路径原样
+ *  - baseUrl 不含 /api 段：path 已带 /api → 不动（幂等）；无前缀 → 自动补 /api
  *  - 绝对 URL（健康检查直连等）→ 不动
  */
 export function normalizeApiPath(path: string, baseUrl: string): string {
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(path)) return path;
+  if (baseUrl === "/api" || baseUrl.endsWith("/api")) {
+    return path.replace(/^\/api(?=\/|$)/, "");
+  }
   if (path === "/api" || path.startsWith("/api/")) return path;
-  if (baseUrl === "/api" || baseUrl.endsWith("/api")) return path;
   if (path.startsWith("/")) return `/api${path}`;
   return path;
 }
