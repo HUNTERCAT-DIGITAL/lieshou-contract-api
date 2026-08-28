@@ -9,17 +9,20 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "gen:api": "openapi-typescript http://localhost:9000/v3/api-docs/user -o ./src/generated.ts",
-    "gen:api:admin": "openapi-typescript http://localhost:9000/v3/api-docs/admin -o ./src/generated.admin.ts",
-    "lint": "echo \"lint: api-client ESLint config TODO Phase 2\" && exit 0",
+    "gen:api": "openapi-typescript ${OPENAPI_USER_URL:-http://localhost:9000/v3/api-docs/user} -o ./src/generated.ts",
+    "gen:api:admin": "openapi-typescript ${OPENAPI_ADMIN_URL:-http://localhost:9000/v3/api-docs/admin} -o ./src/generated.admin.ts",
+    "lint": "eslint src",
     "typecheck": "tsc --noEmit",
     "build": "tsc --noEmit",
     "test": "vitest run"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@lieshoucloud/contract-config": "workspace:*",
+    "eslint": "^10.9.1",
     "openapi-typescript": "^7.4.4",
     "typescript": "5.6.3",
-    "vitest": "^3.2.0",
-    "@lieshoucloud/contract-config": "workspace:*"
+    "typescript-eslint": "^8.68.0",
+    "vitest": "^3.2.0"
   }
 }
