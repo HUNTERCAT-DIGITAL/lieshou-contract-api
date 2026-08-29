@@ -188,6 +188,7 @@ export interface ApiLogEntry {
 interface CoreConfig {
   baseUrl: string;
   getToken?: () => string | null;
+  getHeaders?: () => Record<string, string>;
   onUnauthorized?: () => void;
   refreshTokens?: () => Promise<boolean>;
   onLog?: (entry: ApiLogEntry) => void;
@@ -248,6 +249,7 @@ async function coreRequest<T>(cfg: CoreConfig, opts: ApiRequestOptions, retried 
   const headers: Record<string, string> = {
     ...(isForm ? {} : { "Content-Type": "application/json" }),
     ...(opts.headers ?? {}),
+    ...(cfg.getHeaders?.() ?? {}),
   };
   const token = cfg.getToken?.();
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -344,6 +346,8 @@ export async function request<T>(opts: ApiRequestOptions): Promise<T> {
 
 export interface ApiClientHooks {
   getAccessToken?: () => string | null;
+  /** 全局请求头（如 Accept-Language 随语言切换）——每次请求动态求值 */
+  getHeaders?: () => Record<string, string>;
   /** 返回 true=刷新成功,401 时自动重试一次 */
   refreshTokens?: () => Promise<boolean>;
   /** 401 且 refresh 失败：提示 + logout + 跳登录 */
@@ -376,6 +380,7 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
   const cfg: CoreConfig = {
     baseUrl: options.baseUrl ?? "",
     getToken: options.hooks?.getAccessToken,
+    getHeaders: options.hooks?.getHeaders,
     onUnauthorized: options.hooks?.onUnauthorized,
     refreshTokens: options.hooks?.refreshTokens,
     onLog: options.hooks?.onLog,
