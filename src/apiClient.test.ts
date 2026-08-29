@@ -261,9 +261,19 @@ describe("createApiClient（coreRequest 核心路径）", () => {
 // ============================================================
 
 describe("getErrorMessage", () => {
-  it("ApiError/AuthError 带 code 前缀，便于定位", () => {
-    expect(getErrorMessage(new ApiError("INTERNAL", "boom", 500))).toBe("INTERNAL: boom");
-    expect(getErrorMessage(new AuthError("UNAUTHORIZED", "登录已过期", 401))).toBe("UNAUTHORIZED: 登录已过期");
+  it("ApiError/AuthError 优先返回 message（后端 S5 起已本地化），不再拼英文 code 前缀", () => {
+    expect(getErrorMessage(new ApiError("INTERNAL", "boom", 500))).toBe("boom");
+    expect(getErrorMessage(new AuthError("UNAUTHORIZED", "登录已过期", 401))).toBe("登录已过期");
+  });
+
+  it("message 为空时按 code 查共享 i18n 映射（error.common.*）", () => {
+    expect(getErrorMessage(new ApiError("BAD_REQUEST", "", 400))).toBe("请求参数错误");
+    expect(getErrorMessage(new ApiError("NOT_FOUND", "", 404))).toBe("资源不存在");
+    expect(getErrorMessage(new ApiError("HTTP_502", "", 502))).toBe("请求失败（HTTP 502）");
+  });
+
+  it("未映射 code 返回 code 本身", () => {
+    expect(getErrorMessage(new ApiError("INVALID_DEVICE_CREDENTIALS", "", 401))).toBe("INVALID_DEVICE_CREDENTIALS");
   });
 
   it("普通 Error 返回 message，非 Error 兜底 String()", () => {

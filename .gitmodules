@@ -1,3 +1,6 @@
 [submodule "open/config"]
 	path = open/config
 	url = git@github.com:HUNTERCAT-DIGITAL/lieshou-contract-config.git
+[submodule "open/i18n"]
+	path = open/i18n
+	url = git@github.com:HUNTERCAT-DIGITAL/lieshou-i18n.git

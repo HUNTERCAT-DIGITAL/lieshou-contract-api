@@ -20,6 +20,8 @@
  * @see BOTTOM_UP.md · L0-2
  */
 
+import { t, type TranslationKey } from "@lieshoucloud/i18n";
+
 export interface ApiRequestOptions {
   method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
   /** 资源路径。/api 前缀由 normalizeApiPath 幂等归一（已带/不带均可，绝对 URL 原样透传） */
@@ -97,14 +99,40 @@ export function isAuthError(e: unknown): e is AuthError {
   return e instanceof AuthError;
 }
 
-/** 任意异常 → 可读 message（兜底展示用）。ApiError/AuthError 额外带 code 便于定位 */
+/** 任意异常 → 可读 message（兜底展示用 · 2026-09 S6 中文化）。
+ *
+ * 优先返回 message（后端 S5 起按 Accept-Language 本地化）；message 为空时按 code
+ * 查共享 i18n 映射（error.common.*），命中返回中文文案，未命中返回 code 本身。 */
 export function getErrorMessage(e: unknown): string {
   if (e instanceof ApiError || e instanceof AuthError) {
-    return e.code ? `${e.code}: ${e.message}` : e.message;
+    if (e.message) return e.message;
+    // HTTP_<status> 兜底码（readErrorBody 无响应体时）：转中文状态文案
+    const httpMatch = /^HTTP_(\d+)$/.exec(e.code);
+    if (httpMatch) return t("error.common.http_status", { 0: httpMatch[1] });
+    const key = CODE_TO_I18N_KEY[e.code];
+    return key ? t(key as TranslationKey) : e.code;
   }
   if (e instanceof Error && e.message) return e.message;
   return String(e);
 }
+
+/** 错误码 → i18n key（与 lieshou-i18n messages/error.common.* 对齐；无 message 兜底用） */
+const CODE_TO_I18N_KEY: Record<string, string> = {
+  BAD_REQUEST: "error.common.bad_request",
+  VALIDATION_FAILED: "error.common.validation_failed",
+  UNAUTHORIZED: "error.common.unauthorized",
+  TENANT_CONTEXT_REQUIRED: "error.common.tenant_context_required",
+  FORBIDDEN: "error.common.forbidden",
+  NOT_FOUND: "error.common.not_found",
+  CONFLICT: "error.common.conflict",
+  BUSINESS_CONFLICT: "error.common.business_conflict",
+  DATA_CONFLICT: "error.common.data_conflict",
+  INTERNAL: "error.common.internal_error",
+  INTERNAL_ERROR: "error.common.internal_error",
+  SERVICE_UNAVAILABLE: "error.common.service_unavailable",
+  TIMEOUT: "error.common.timeout",
+  NETWORK_ERROR: "error.common.network",
+};
 
 // ============================================================
 // 模块级配置（用法 A · 兼容旧 API）
@@ -194,11 +222,16 @@ async function readErrorBody(res: Response): Promise<{ code: string; message: st
     const body = (await res.json()) as { error?: string; message?: string };
     return {
       code: body.error ?? `HTTP_${res.status}`,
-      message: body.message ?? `HTTP ${res.status} ${res.statusText}`,
+      message: body.message ?? httpStatusText(res.status),
     };
   } catch {
-    return { code: `HTTP_${res.status}`, message: `HTTP ${res.status} ${res.statusText}` };
+    return { code: `HTTP_${res.status}`, message: httpStatusText(res.status) };
   }
+}
+
+/** HTTP 状态码兜底文案（中文化 · S6，替代英文 "HTTP 404 Not Found"） */
+function httpStatusText(status: number): string {
+  return t("error.common.http_status", { 0: String(status) });
 }
 
 /**
