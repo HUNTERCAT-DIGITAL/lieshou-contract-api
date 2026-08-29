@@ -245,7 +245,8 @@ async function coreRequest<T>(cfg: CoreConfig, opts: ApiRequestOptions, retried 
   const method = opts.method;
 
   // multipart（FormData）：浏览器自动带 boundary,不能手动设 Content-Type
-  const isForm = opts.body instanceof FormData;
+  // ⚠️ 小程序端无 FormData 全局：instanceof 右侧标识符求值即 ReferenceError，必须 typeof 守卫
+  const isForm = typeof FormData !== 'undefined' && opts.body instanceof FormData;
   const headers: Record<string, string> = {
     ...(isForm ? {} : { "Content-Type": "application/json" }),
     ...(opts.headers ?? {}),
