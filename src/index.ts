@@ -173,6 +173,39 @@ export function getBaseUrl(): string {
   return baseUrl;
 }
 
+// ------------------------------------------------------------
+// 请求适配器（默认 web fetch；小程序/RN 等无 fetch 环境注入平台实现）
+// ------------------------------------------------------------
+
+export interface RequestAdapterInit {
+  method: string;
+  headers?: Record<string, string>;
+  body?: unknown;
+  signal?: AbortSignal | null;
+}
+
+export interface RequestAdapterResponse {
+  status: number;
+  ok: boolean;
+  json(): Promise<unknown>;
+  text(): Promise<string>;
+  blob(): Promise<unknown>;
+}
+
+export type RequestAdapter = (url: string, init: RequestAdapterInit) => Promise<RequestAdapterResponse>;
+
+let requestAdapter: RequestAdapter | null = null;
+
+/** 注入平台请求适配器（小程序：Taro.request；RN：fetch 自带或 polyfill；缺省 web fetch） */
+export function setRequestAdapter(adapter: RequestAdapter | null): void {
+  requestAdapter = adapter;
+}
+
+/** 当前请求适配器（null = web fetch） */
+export function getRequestAdapter(): RequestAdapter | null {
+  return requestAdapter;
+}
+
 // ============================================================
 // 核心请求逻辑（模块级单例 与 实例工厂 共用）
 // ============================================================
@@ -218,7 +251,7 @@ function createRefreshOnce(
 }
 
 /** 解析后端标准化错误体 { error?, message? } */
-async function readErrorBody(res: Response): Promise<{ code: string; message: string }> {
+async function readErrorBody(res: RequestAdapterResponse): Promise<{ code: string; message: string }> {
   try {
     const body = (await res.json()) as { error?: string; message?: string };
     return {
@@ -267,16 +300,29 @@ async function coreRequest<T>(cfg: CoreConfig, opts: ApiRequestOptions, retried 
   const log = (status: number, error?: string) =>
     cfg.onLog?.({ method, path: opts.path, status, durationMs: Math.round(performance.now() - startedAt), error });
 
-  const controller = opts.timeoutMs ? new AbortController() : undefined;
-  const timer = opts.timeoutMs ? setTimeout(() => controller!.abort(), opts.timeoutMs) : undefined;
-  let res: Response;
+  const controller =
+    typeof AbortController !== 'undefined' && opts.timeoutMs ? new AbortController() : undefined;
+  const timer = controller ? setTimeout(() => controller.abort(), opts.timeoutMs) : undefined;
+  const rawBody =
+    opts.body !== undefined ? (isForm ? (opts.body as FormData) : JSON.stringify(opts.body)) : undefined;
+  let res: RequestAdapterResponse;
   try {
-    res = await fetch(url, {
-      method,
-      headers,
-      body: opts.body !== undefined ? (isForm ? (opts.body as FormData) : JSON.stringify(opts.body)) : undefined,
-      signal: controller?.signal,
-    });
+    if (requestAdapter) {
+      // 小程序等无 fetch 环境：平台注入的适配器（Taro.request 等）
+      res = await requestAdapter(url, {
+        method,
+        headers,
+        body: rawBody,
+        signal: controller?.signal,
+      });
+    } else {
+      res = (await fetch(url, {
+        method,
+        headers,
+        body: rawBody,
+        signal: controller?.signal,
+      })) as unknown as RequestAdapterResponse;
+    }
   } catch (e) {
     // 超时 abort → 明确报 TIMEOUT；其余保留底层原因（WebView2/Chromium 的 net::ERR_xxx）
     if (controller?.signal.aborted) {
