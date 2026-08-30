@@ -253,10 +253,18 @@ function createRefreshOnce(
 /** 解析后端标准化错误体 { error?, message? } */
 async function readErrorBody(res: RequestAdapterResponse): Promise<{ code: string; message: string }> {
   try {
-    const body = (await res.json()) as { error?: string; message?: string };
+    const body = (await res.json()) as { error?: unknown; message?: unknown };
+    // 防御：后端 message 可能是对象/嵌套结构 → 保证展示层拿到字符串（避免 [object Object]）
+    const rawMsg = body.message ?? body.error;
+    const message =
+      typeof rawMsg === 'string'
+        ? rawMsg
+        : rawMsg != null
+          ? JSON.stringify(rawMsg)
+          : httpStatusText(res.status);
     return {
-      code: body.error ?? `HTTP_${res.status}`,
-      message: body.message ?? httpStatusText(res.status),
+      code: typeof body.error === 'string' ? body.error : `HTTP_${res.status}`,
+      message: message || httpStatusText(res.status),
     };
   } catch {
     return { code: `HTTP_${res.status}`, message: httpStatusText(res.status) };
